@@ -4,7 +4,7 @@ const OpenAI = require('openai');
 const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const ASSISTANT_ID = 'asst_HeWgvAnXUT4hJBvoTq42PoTg'; // Your actual Assistant ID
+const ASSISTANT_ID = 'asst_HeWgvAnXUT4hlBvotq42poTg'; // Your actual Assistant ID
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -56,3 +56,4 @@ module.exports = async function handler(req, res) {
     res.status(500).json({ error: error.message });
   }
 };
+
