@@ -82,13 +82,18 @@ module.exports = async function handler(req, res) {
         throw new Error("Assistant run timeout");
       }
 
-      console.info(`⏳ About to retrieve run - threadId: "${threadId}", runId: "${runId}"`);
+      console.info(`⏳ Polling attempt ${attempts + 1}`);
+      console.info(`⏳ Using threadId: "${threadId}"`);
+      console.info(`⏳ Using runId: "${runId}"`);
       
-      // ✅ CRITICAL FIX: Make sure parameters are in correct order
-      // The correct order is: retrieve(threadId, runId)
-      runStatus = await openai.beta.threads.runs.retrieve(threadId, runId);
+      // ✅ CRITICAL FIX: Use the runs object method directly with explicit parameters
+      // This should prevent any parameter confusion
+      runStatus = await openai.beta.threads.runs.retrieve({
+        thread_id: threadId,
+        run_id: runId
+      });
       
-      console.info(`⏳ Run status: ${runStatus.status} (attempt ${attempts + 1})`);
+      console.info(`⏳ Run status: ${runStatus.status}`);
 
       if (runStatus.status === "failed") {
         console.error("Run failed:", runStatus.last_error);
@@ -104,7 +109,8 @@ module.exports = async function handler(req, res) {
       }
 
       if (runStatus.status === "requires_action") {
-        console.info("🔧 Run requires action");
+        console.info("🔧 Run requires action - function calling needed");
+        // Add function calling logic here if your assistant uses tools
       }
 
       if (!["completed", "failed", "cancelled", "expired"].includes(runStatus.status)) {
@@ -130,8 +136,8 @@ module.exports = async function handler(req, res) {
     console.info("📱 Sending to WhatsApp...");
     await client.messages.create({
       body: assistantReply,
-      from: "whatsapp:+14155238886", // ✅ Fixed: Twilio sandbox number
-      to: fromNumber, // This should be "whatsapp:+923247165656"
+      from: "whatsapp:+14155238886",
+      to: fromNumber,
     });
 
     console.info("✅ Message sent to WhatsApp successfully");
@@ -145,14 +151,15 @@ module.exports = async function handler(req, res) {
 
   } catch (error) {
     console.error("❌ Error:", error.message);
+    console.error("❌ Stack:", error.stack);
     
-    // Send error message to WhatsApp user (fixed WhatsApp format)
+    // Send error message to WhatsApp user
     if (req.body.From) {
       try {
         await client.messages.create({
           body: "Sorry, I encountered an error processing your message. Please try again later.",
-          from: "whatsapp:+14155238886", // ✅ Correct format
-          to: req.body.From, // This is already in correct format from Twilio
+          from: "whatsapp:+14155238886",
+          to: req.body.From,
         });
         console.info("✅ Error message sent to WhatsApp");
       } catch (twilioError) {
