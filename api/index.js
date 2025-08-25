@@ -1,207 +1,89 @@
-const twilio = require("twilio");
-const OpenAI = require("openai");
-
-const client = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const ASSISTANT_ID = process.env.ASSISTANT_ID;
-const CALENDLY_API_URL = "https://ma4-calendly-server-1mxrjzctv-ma4-ltds-projects.vercel.app/api";
-
-// Direct REST API call for run retrieval (bypassing broken SDK)
-async function retrieveRun(threadId, runId) {
-  const response = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-      'OpenAI-Beta': 'assistants=v2',
-      'Content-Type': 'application/json'
-    }
-  });
-  
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  
-  return await response.json();
-}
-
-// Function to get Calendly booking link
-async function getCalendlyLink(userMessage) {
+// Function to handle Calendly requests (both general link and specific availability)
+async function getCalendlyAvailability(userMessage) {
   try {
-    const response = await fetch(CALENDLY_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        message: userMessage,
-        action: 'get_booking_link'
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Calendly API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.booking_link || data.link || "Here's your booking link: https://calendly.com/your-link";
-  } catch (error) {
-    console.error("Error getting Calendly link:", error);
-    return "I can help you schedule a meeting! Please visit our booking page or contact us directly.";
-  }
-}
-
-// Submit tool outputs for function calling
-async function submitToolOutputs(threadId, runId, toolOutputs) {
-  const response = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}/submit_tool_outputs`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-      'OpenAI-Beta': 'assistants=v2',
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      tool_outputs: toolOutputs
-    })
-  });
-  
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-  
-  return await response.json();
-}
-
-module.exports = async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
-  try {
-    const incomingMessage = req.body.Body?.trim() || "";
-    const fromNumber = req.body.From;
+    const message = userMessage.toLowerCase();
     
-    console.info(`📩 Message from ${fromNumber}: ${incomingMessage}`);
+    // Check if user specifically asks for availability/slots
+    const wantsAvailability = message.includes('availability') || 
+                             message.includes('available') || 
+                             message.includes('slots') || 
+                             message.includes('times') || 
+                             message.includes('when') ||
+                             message.includes('schedule');
 
-    // Step 1: Create thread
-    const thread = await openai.beta.threads.create();
-    console.info("🧵 Thread created:", thread.id);
+    // If they want specific availability, fetch time slots
+    if (wantsAvailability) {
+      const today = new Date();
+      const startDate = today.toISOString().split('T')[0];
+      const endDate = new Date(today.getTime() + (7 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
 
-    // Step 2: Add message
-    await openai.beta.threads.messages.create(thread.id, {
-      role: "user",
-      content: incomingMessage,
-    });
-    console.info("✅ Message added to thread");
+      const response = await fetch(CALENDLY_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          start_date: startDate,
+          end_date: endDate
+        })
+      });
 
-    // Step 3: Create run
-    const run = await openai.beta.threads.runs.create(thread.id, {
-      assistant_id: ASSISTANT_ID,
-    });
-    console.info("🚀 Run started:", run.id);
-
-    // Step 4: Poll for completion and handle function calls
-    let runStatus;
-    let attempts = 0;
-    const maxAttempts = 60;
-
-    do {
-      if (attempts >= maxAttempts) {
-        throw new Error("Run timeout");
-      }
-
-      console.info(`⏳ Polling attempt ${attempts + 1}`);
-      runStatus = await retrieveRun(thread.id, run.id);
-      console.info("⏳ Status:", runStatus.status);
-
-      // Handle function calling
-      if (runStatus.status === "requires_action") {
-        console.info("🔧 Function call required");
+      if (response.ok) {
+        const data = await response.json();
+        console.log("🔍 Calendly API Response:", JSON.stringify(data, null, 2));
         
-        const toolCalls = runStatus.required_action.submit_tool_outputs.tool_calls;
-        const toolOutputs = [];
-        
-        for (const toolCall of toolCalls) {
-          if (toolCall.function.name === "get_calendly_link") {
-            console.info("📅 Getting Calendly link...");
-            const args = JSON.parse(toolCall.function.arguments);
-            const calendlyResponse = await getCalendlyLink(args.message || incomingMessage);
-            
-            toolOutputs.push({
-              tool_call_id: toolCall.id,
-              output: calendlyResponse
+        if (data && Array.isArray(data) && data.length > 0) {
+          let availabilityMessage = "📅 **Here are our available consultation slots:**\n\n";
+          
+          const availableSlots = data.filter(slot => slot.status === "available").slice(0, 5);
+          
+          if (availableSlots.length > 0) {
+            availableSlots.forEach((slot, index) => {
+              const startTime = new Date(slot.start_time);
+              const dateStr = startTime.toLocaleDateString('en-US', { 
+                weekday: 'short', 
+                month: 'short', 
+                day: 'numeric' 
+              });
+              const timeStr = startTime.toLocaleTimeString('en-US', { 
+                hour: 'numeric', 
+                minute: '2-digit',
+                hour12: true 
+              });
+              
+              availabilityMessage += `🕐 ${dateStr} at ${timeStr}\n`;
+              availabilityMessage += `   📌 Book directly: ${slot.scheduling_url}\n\n`;
             });
+            
+            availabilityMessage += "**OR** browse all available times here: https://calendly.com/ma4ltd/30min\n\n";
+            availabilityMessage += "Click any direct link above for instant booking! 🚀";
+            return availabilityMessage;
           }
         }
-        
-        if (toolOutputs.length > 0) {
-          await submitToolOutputs(thread.id, run.id, toolOutputs);
-          console.info("✅ Tool outputs submitted");
-        }
       }
-
-      if (runStatus.status === "failed") {
-        throw new Error(`Run failed: ${runStatus.last_error?.message || 'Unknown error'}`);
-      }
-
-      if (runStatus.status === "cancelled" || runStatus.status === "expired") {
-        throw new Error(`Run ${runStatus.status}`);
-      }
-
-      if (!["completed", "failed", "cancelled", "expired"].includes(runStatus.status)) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        attempts++;
-      }
-
-    } while (runStatus.status !== "completed");
-
-    console.info("✅ Run completed");
-
-    // Step 5: Get messages
-    const messages = await openai.beta.threads.messages.list(thread.id);
-    const assistantMessage = messages.data.find(msg => msg.role === "assistant");
-    const assistantReply = assistantMessage?.content[0]?.text?.value || "No response";
-
-    console.info("🤖 Assistant reply:", assistantReply);
-
-    // Step 6: Send to WhatsApp
-    if (process.env.NODE_ENV !== 'test') {
-      await client.messages.create({
-        body: assistantReply,
-        from: "whatsapp:+14155238886",
-        to: fromNumber,
-      });
-      console.info("✅ Sent to WhatsApp");
     }
 
-    res.status(200).json({ 
-      success: true, 
-      reply: assistantReply,
-      threadId: thread.id,
-      runId: run.id
-    });
+    // Default response: provide general booking link + availability info
+    return `📅 **Book Your Consultation**
+
+**Quick Booking:** https://calendly.com/ma4ltd/30min
+
+**Our Available Hours:**
+- Monday-Friday: 8:00 AM - 5:00 PM GMT
+- Saturday: 9:00 AM - 3:00 PM GMT
+
+Would you like me to show you specific available time slots? Just ask for "availability" and I'll show you the next few days with direct booking links! 😊`;
 
   } catch (error) {
-    console.error("❌ Error:", error);
-    
-    if (req.body.From && process.env.NODE_ENV !== 'test') {
-      try {
-        await client.messages.create({
-          body: "Sorry, I encountered an error. Please try again.",
-          from: "whatsapp:+14155238886",
-          to: req.body.From,
-        });
-      } catch (twilioError) {
-        console.error("❌ Twilio error:", twilioError);
-      }
-    }
+    console.error("Error getting Calendly information:", error);
+    return `📅 **Book Your Consultation**
 
-    res.status(500).json({ error: error.message });
+Visit: https://calendly.com/ma4ltd/30min
+
+**Our Hours:**
+- Monday-Friday: 8:00 AM - 5:00 PM GMT  
+- Saturday: 9:00 AM - 3:00 PM GMT
+
+For immediate assistance, please contact us directly!`;
   }
-};
+}
