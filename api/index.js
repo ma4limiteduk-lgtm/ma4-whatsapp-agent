@@ -1,13 +1,11 @@
 const twilio = require("twilio");
 const OpenAI = require("openai");
 
-// Twilio client
 const client = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
 
-// OpenAI client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -23,42 +21,42 @@ module.exports = async function handler(req, res) {
     const incomingMessage = req.body.Body?.trim() || "";
     const fromNumber = req.body.From;
     
-    console.info(`📩 Incoming message from ${fromNumber}: ${incomingMessage}`);
+    console.info(`📩 Message from ${fromNumber}: ${incomingMessage}`);
 
-    // Step 1: Create a thread
+    // Create thread
     const thread = await openai.beta.threads.create();
     console.info("🧵 Thread created:", thread.id);
 
-    // Step 2: Add user message to the thread
+    // Add message
     await openai.beta.threads.messages.create(thread.id, {
       role: "user",
       content: incomingMessage,
     });
 
-    // Step 3: Run the assistant
+    // Create run
     const run = await openai.beta.threads.runs.create(thread.id, {
       assistant_id: ASSISTANT_ID,
     });
     console.info("🚀 Run started:", run.id);
 
-    // Step 4: Poll until the run is completed
+    // Poll for completion
     let runStatus;
     do {
       runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
-      console.info("⏳ Run status:", runStatus.status);
+      console.info("⏳ Status:", runStatus.status);
       
       if (runStatus.status !== "completed") {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     } while (runStatus.status !== "completed");
 
-    // Step 5: Get assistant reply
+    // Get response
     const messages = await openai.beta.threads.messages.list(thread.id);
     const assistantReply = messages.data[0]?.content[0]?.text?.value || "No response";
 
-    console.info(`🤖 Assistant reply: ${assistantReply}`);
+    console.info("🤖 Reply:", assistantReply);
 
-    // Step 6: Send back to WhatsApp
+    // Send to WhatsApp
     await client.messages.create({
       body: assistantReply,
       from: "whatsapp:+14155238886",
