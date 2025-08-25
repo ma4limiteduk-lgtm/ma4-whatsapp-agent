@@ -8,7 +8,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "MA4",
+  "author": "MA4", 
   "license": "ISC",
   "dependencies": {
     "dotenv": "^16.4.5",
