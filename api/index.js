@@ -6,10 +6,11 @@ const client = twilio(
   process.env.TWILIO_AUTH_TOKEN
 );
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-// Store Assistant ID in environment variables for safety
-const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID;
+const ASSISTANT_ID = process.env.ASSISTANT_ID;
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
@@ -17,53 +18,51 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const incomingMessage = req.body.Body;
+    const incomingMessage = req.body.Body?.trim() || "";
     const fromNumber = req.body.From;
 
-    console.log(`📩 Incoming WhatsApp from ${fromNumber}: ${incomingMessage}`);
+    console.log(`📩 Incoming message from ${fromNumber}: ${incomingMessage}`);
 
-    // ✅ Step 1: Create a thread
+    // Step 1: Create a thread
     const thread = await openai.beta.threads.create();
 
-    // ✅ Step 2: Add the user’s message (correct format!)
+    // Step 2: Add user message to the thread
     await openai.beta.threads.messages.create(thread.id, {
       role: "user",
-      content: [
-        {
-          type: "text",
-          text: incomingMessage,
-        },
-      ],
+      content: incomingMessage,
     });
 
-    // ✅ Step 3: Run the assistant on that thread
+    // Step 3: Run the assistant
     const run = await openai.beta.threads.runs.create(thread.id, {
       assistant_id: ASSISTANT_ID,
     });
 
-    // ✅ Step 4: Poll until the run completes
+    // Step 4: Poll until the run is completed
     let runStatus;
     do {
-      await new Promise((r) => setTimeout(r, 1000)); // wait 1 sec
       runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+      if (runStatus.status !== "completed") {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
     } while (runStatus.status !== "completed");
 
-    // ✅ Step 5: Get the assistant’s reply
+    // Step 5: Get assistant reply
     const messages = await openai.beta.threads.messages.list(thread.id);
-    const reply = messages.data[0].content[0].text.value;
+    const assistantReply =
+      messages.data[0]?.content[0]?.text?.value || "⚠️ No response from assistant";
 
-    console.log(`🤖 Assistant reply: ${reply}`);
+    console.log(`🤖 Assistant reply: ${assistantReply}`);
 
-    // ✅ Step 6: Send reply back via Twilio WhatsApp
+    // Step 6: Send back to WhatsApp
     await client.messages.create({
-      body: reply,
-      from: "whatsapp:+14155238886", // Twilio sandbox or approved WhatsApp number
+      body: assistantReply,
+      from: "whatsapp:+14155238886", // Twilio Sandbox number
       to: fromNumber,
     });
 
-    return res.status(200).json({ success: true, reply });
-  } catch (err) {
-    console.error("❌ Error in handler:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("❌ Error:", error);
+    res.status(500).json({ error: error.message });
   }
 };
