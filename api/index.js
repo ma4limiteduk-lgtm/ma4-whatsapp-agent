@@ -39,85 +39,126 @@ async function retrieveRun(threadId, runId) {
 // Function to handle Calendly requests
 async function getCalendlyAvailability(userMessage) {
   try {
-    console.log("🔍 Getting Calendly info for:", userMessage);
+    console.log("🔍 Calendly function called with message:", userMessage);
     
-    const message = (userMessage || "").toLowerCase();
-    
-    // Check if user wants specific availability
-    const wantsAvailability = message.includes('availability') || 
-                             message.includes('available') || 
-                             message.includes('slots') || 
-                             message.includes('times') || 
-                             message.includes('when');
+    // Always fetch available slots
+    const today = new Date();
+    const startDate = today.toISOString().split('T')[0];
+    const endDate = new Date(today.getTime() + (7 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
 
-    if (wantsAvailability) {
-      console.log("📅 User wants specific availability");
-      
-      const today = new Date();
-      const startDate = today.toISOString().split('T')[0];
-      const endDate = new Date(today.getTime() + (7 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+    console.log(`📅 Fetching slots from ${startDate} to ${endDate}`);
 
-      const response = await fetch(CALENDLY_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          start_date: startDate,
-          end_date: endDate
-        })
-      });
+    const response = await fetch(CALENDLY_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        start_date: startDate,
+        end_date: endDate
+      })
+    });
 
-      if (response.ok) {
-        const data = await response.json();
-        console.log("📊 Calendly slots received:", data.length || 0);
-        
-        if (data && Array.isArray(data) && data.length > 0) {
-          const availableSlots = data.filter(slot => slot.status === "available").slice(0, 5);
-          
-          if (availableSlots.length > 0) {
-            let message = "📅 Available consultation slots:\n\n";
-            
-            availableSlots.forEach((slot, index) => {
-              const startTime = new Date(slot.start_time);
-              const dateStr = startTime.toLocaleDateString('en-US', { 
-                weekday: 'short', 
-                month: 'short', 
-                day: 'numeric' 
-              });
-              const timeStr = startTime.toLocaleTimeString('en-US', { 
-                hour: 'numeric', 
-                minute: '2-digit',
-                hour12: true 
-              });
-              
-              message += `🕐 ${dateStr} at ${timeStr}\n`;
-              message += `   Book: ${slot.scheduling_url}\n\n`;
-            });
-            
-            message += "Or browse all times: https://calendly.com/ma4ltd/30min";
-            return message;
-          }
-        }
-      }
+    console.log("📡 Response status:", response.status);
+
+    if (!response.ok) {
+      console.error("❌ API Error:", response.status, response.statusText);
+      throw new Error(`API Error: ${response.status}`);
     }
 
-    // Default response
-    return `📅 Book Your Consultation
+    const data = await response.json();
+    console.log("📊 Raw Calendly data:", JSON.stringify(data, null, 2));
 
-Quick Booking: https://calendly.com/ma4ltd/30min
+    // Check if data exists and is an array
+    if (!data || !Array.isArray(data)) {
+      console.error("❌ Invalid data format:", typeof data);
+      throw new Error("Invalid response format");
+    }
 
-Our Hours:
+    // Filter available slots
+    const availableSlots = data.filter(slot => 
+      slot && 
+      slot.status === "available" && 
+      slot.scheduling_url && 
+      slot.start_time
+    );
+
+    console.log(`✅ Found ${availableSlots.length} available slots`);
+
+    if (availableSlots.length === 0) {
+      return `📅 **Book Your Consultation**
+
+Currently showing no available slots in our system. 
+
+**Direct booking:** https://calendly.com/ma4ltd/30min
+
+**Our Hours:**
+- Monday-Friday: 8:00 AM - 5:00 PM GMT
+- Saturday: 9:00 AM - 3:00 PM GMT`;
+    }
+
+    // Build the response with specific slots
+    let message = "📅 **Available Consultation Times:**\n\n";
+    
+    // Show first 5 slots
+    const slotsToShow = availableSlots.slice(0, 5);
+    
+    slotsToShow.forEach((slot, index) => {
+      try {
+        const startTime = new Date(slot.start_time);
+        
+        // Format date
+        const options = { 
+          weekday: 'long', 
+          month: 'long', 
+          day: 'numeric',
+          timeZone: 'GMT'
+        };
+        const dateStr = startTime.toLocaleDateString('en-US', options);
+        
+        // Format time
+        const timeOptions = { 
+          hour: 'numeric', 
+          minute: '2-digit',
+          hour12: true,
+          timeZone: 'GMT'
+        };
+        const timeStr = startTime.toLocaleTimeString('en-US', timeOptions);
+        
+        message += `🕐 **${dateStr}**\n`;
+        message += `   ⏰ ${timeStr} GMT\n`;
+        message += `   📌 **Book here:** ${slot.scheduling_url}\n\n`;
+        
+      } catch (dateError) {
+        console.error("❌ Date formatting error:", dateError);
+        message += `🕐 Available slot\n`;
+        message += `   📌 **Book here:** ${slot.scheduling_url}\n\n`;
+      }
+    });
+    
+    if (availableSlots.length > 5) {
+      message += `📋 *Showing ${slotsToShow.length} of ${availableSlots.length} available slots*\n\n`;
+    }
+    
+    message += `💡 **Or browse all times:** https://calendly.com/ma4ltd/30min\n\n`;
+    message += `✨ Click any direct link above for instant booking!`;
+    
+    console.log("✅ Successfully formatted availability response");
+    return message;
+
+  } catch (error) {
+    console.error("❌ getCalendlyAvailability error:", error);
+    
+    // Return fallback with general link
+    return `📅 **Book Your Consultation**
+
+**Quick booking:** https://calendly.com/ma4ltd/30min
+
+**Our Hours:**
 - Monday-Friday: 8:00 AM - 5:00 PM GMT
 - Saturday: 9:00 AM - 3:00 PM GMT
 
-Ask for "availability" to see specific time slots!`;
-
-  } catch (error) {
-    console.error("Error in getCalendlyAvailability:", error);
-    return `📅 Book Your Consultation: https://calendly.com/ma4ltd/30min
-
-Our Hours: Monday-Friday 8AM-5PM GMT, Saturday 9AM-3PM GMT`;
+*Having trouble loading specific times - please use the link above to see all available slots!*`;
   }
 }
 
