@@ -69,14 +69,19 @@ async function getCalendlyAvailability(userMessage) {
     const data = await response.json();
     console.log("📊 Raw Calendly data:", JSON.stringify(data, null, 2));
 
-    // Check if data exists and is an array
-    if (!data || !Array.isArray(data)) {
-      console.error("❌ Invalid data format:", typeof data);
-      throw new Error("Invalid response format");
-    }
+    // Handle both array and object response formats
+let slotsArray;
+if (Array.isArray(data)) {
+  slotsArray = data;
+} else if (data && data.slots && Array.isArray(data.slots)) {
+  slotsArray = data.slots;
+} else {
+  console.error("❌ Invalid data format:", typeof data);
+  throw new Error("Invalid response format");
+}
 
-    // Filter available slots
-    const availableSlots = data.filter(slot => 
+// Filter available slots
+const availableSlots = slotsArray.filter(slot => 
       slot && 
       slot.status === "available" && 
       slot.scheduling_url && 
