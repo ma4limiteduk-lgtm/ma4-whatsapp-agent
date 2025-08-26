@@ -71,14 +71,17 @@ const endDate = new Date(tomorrow.getTime() + (6 * 24 * 60 * 60 * 1000)).toISOSt
     console.log("📊 Raw Calendly data:", JSON.stringify(data, null, 2));
 
     // Handle both array and object response formats
+// Handle both array and object response formats
 let slotsArray;
 if (Array.isArray(data)) {
   slotsArray = data;
+} else if (data && data.collection && Array.isArray(data.collection)) {
+  slotsArray = data.collection;
 } else if (data && data.slots && Array.isArray(data.slots)) {
   slotsArray = data.slots;
 } else {
   console.error("❌ Invalid data format:", typeof data);
-  throw new Error("Invalid response format");
+  throw new Error("Invalid response format");
 }
 
 // Filter available slots
