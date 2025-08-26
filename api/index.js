@@ -43,8 +43,9 @@ async function getCalendlyAvailability(userMessage) {
     
     // Always fetch available slots
     const today = new Date();
-    const startDate = today.toISOString().split('T')[0];
-    const endDate = new Date(today.getTime() + (7 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+const tomorrow = new Date(today.getTime() + (24 * 60 * 60 * 1000)); // Start from tomorrow
+const startDate = tomorrow.toISOString().split('T')[0];
+const endDate = new Date(tomorrow.getTime() + (6 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0]; // 6 days from tomorrow
 
     console.log(`📅 Fetching slots from ${startDate} to ${endDate}`);
 
